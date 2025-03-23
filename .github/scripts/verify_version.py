@@ -7,7 +7,7 @@ with open(cargoPath, 'r') as f:
     cargo_toml = toml.load(f)
 
 version = os.environ.get("GIT_TAG_NAME")
-cargo_toml['package']['version'] = version
+if cargo_toml['package']['version'] != version:
+    exit(1)
 
-with open(cargoPath, 'w') as f:
-    toml.dump(cargo_toml, f)
+exit(0)

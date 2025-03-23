@@ -1,0 +1,26 @@
+[package]
+name = "kagisearch"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+serde = ["dep:serde"]
+
+[dependencies]
+playwright = "0.0.20"
+serde = { version = "1.0.219", features = ["derive", "serde_derive"], optional = true }
+thiserror = "2.0.12"
+tracing = "0.1.41"
+url = "2.5.4"
+
+[dev-dependencies]
+anyhow = "1.0.97"
+serde_json = "1.0.140"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tokio = { version = "1.44.1", features = ["full"] }
+
+[[example]]
+name = "search"
+path = "examples/search.rs"
+required-features = ["serde"]

@@ -2,6 +2,11 @@
 name = "kagisearch"
 version = "0.1.0"
 edition = "2024"
+license = "Apache-2.0"
+license-file = "LICENSE"
+description = "A Rust library that allows you to perform Kagi searches programmatically using Playwright, without consuming additional API credits."
+authors = ["Hanchin Hsieh <me@yuchanns.xyz>"]
+repository = "https://github.com/the-alchemists-of-arland/kagisearch"
 
 [features]
 default = []

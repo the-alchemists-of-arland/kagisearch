@@ -1,5 +1,6 @@
 # Kagi Search 🔍
 
+[![Behavior Test](https://github.com/the-alchemists-of-arland/kagisearch/actions/workflows/test_behavior.yaml/badge.svg?branch=main)](https://github.com/the-alchemists-of-arland/kagisearch/blob/main/.github/workflows/test_behavior.yaml)
 [![Crates.io](https://img.shields.io/crates/v/kagisearch.svg)](https://crates.io/crates/kagisearch)
 [![Documentation](https://docs.rs/kagisearch/badge.svg)](https://docs.rs/kagisearch)
 [![License](https://img.shields.io/badge/license-Apache-blue.svg)](LICENSE)

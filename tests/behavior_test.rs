@@ -1,4 +1,6 @@
 use kagisearch::{AuthType, Kagi, Spawner};
+use tracing::level_filters::LevelFilter;
+use tracing_subscriber::{EnvFilter, fmt};
 
 struct TokioSpawner;
 
@@ -10,6 +12,14 @@ impl Spawner for TokioSpawner {
 
 #[tokio::test]
 async fn test_search() -> anyhow::Result<()> {
+    fmt()
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
+        .init();
+
     let token = std::env::var("KAGI_TOKEN")?;
     let mut kagi = Kagi::new::<TokioSpawner>(AuthType::Token(token)).await?;
     let results = kagi.search("Rust programming language", 5).await?;

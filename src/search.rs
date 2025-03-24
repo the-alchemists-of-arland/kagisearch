@@ -94,10 +94,17 @@ impl Kagi {
         .await?;
         S::spawn(async move {
             while let Some(h) = handler.next().await {
-                if h.is_err() {
-                    break;
+                match h {
+                    Ok(_) => continue,
+                    Err(e) => {
+                        debug!("Browser handler error: {}", e);
+                        if e.to_string().contains("Browser closed") {
+                            break;
+                        }
+                    }
                 }
             }
+            debug!("Browser handler stopped");
         });
         if let AuthType::Cookies(cookies) = &auth_type {
             browser.set_cookies(cookies.to_vec()).await?;

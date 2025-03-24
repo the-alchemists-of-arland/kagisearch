@@ -47,12 +47,33 @@ pub struct Kagi {
     browser: Browser,
 }
 
+/// Spawner trait
+/// Used to spawn futures
+/// This is required because the browser handler runs in a separate thread
+/// and we need to spawn the handler in the same runtime as the browser
 pub trait Spawner {
     fn spawn(future: impl Future<Output = ()> + Send + 'static);
 }
 
 impl Kagi {
-    /// Create a new browser instance
+    /// Create a new browser instance with authentication.
+    ///
+    /// This method initializes a new headless browser instance with pre-configured settings optimized
+    /// for web scraping. It requires a spawner implementation to handle browser events in the background.
+    ///
+    /// # Authentication Types
+    ///
+    /// The browser can be authenticated in three ways:
+    /// - Using email and password (with optional 2FA)
+    /// - Using a Kagi login token
+    /// - Using pre-saved cookies
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Browser initialization fails
+    /// - Cookie loading fails (when using `AuthType::Cookies`)
+    ///
     pub async fn new<S: Spawner>(auth_type: AuthType) -> Result<Self, Error> {
         let viewport = Viewport {
             width: 1920,
@@ -113,6 +134,7 @@ impl Kagi {
         Ok(Self { auth_type, browser })
     }
 
+    /// Close the browser instance
     pub async fn close(&mut self) -> Result<(), Error> {
         self.browser.close().await?;
         self.browser.wait().await?;
@@ -139,8 +161,72 @@ impl Kagi {
         Ok(page)
     }
 
-    /// Search for a query and return the results
-    /// The limit parameter specifies the maximum number of results to return
+    /// Performs a search query on Kagi and returns the results.
+    ///
+    /// This method will:
+    /// 1. Create a new page
+    /// 2. Navigate to Kagi search
+    /// 3. Handle authentication if needed
+    /// 4. Extract search results
+    ///
+    /// # Parameters
+    ///
+    /// - `query`: The search term to look for
+    /// - `limit`: Maximum number of results to return
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(Some(Vec<SearchResult>))` if the search was successful and results were found.
+    /// Returns `Ok(None)` if no results were found.
+    /// Returns `Err` if any error occurred during the search process.
+    ///
+    /// Each `SearchResult` contains:
+    /// - `title`: The title of the search result
+    /// - `url`: The URL of the result
+    /// - `snippet`: A brief description or snippet from the result
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use kagisearch::{Kagi, AuthType, Spawner};
+    ///
+    /// struct TokioSpawner;
+    /// impl Spawner for TokioSpawner {
+    ///     fn spawn(future: impl std::future::Future<Output = ()> + Send + 'static) {
+    ///         tokio::spawn(future);
+    ///     }
+    /// }
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let token = std::env::var("KAGI_TOKEN")?;
+    ///     let mut kagi = Kagi::new::<TokioSpawner>(AuthType::Token(token)).await?;
+    ///     
+    ///     // Search for "Rust programming" and get up to 5 results
+    ///     let results = kagi.search("Rust programming", 5).await?;
+    ///     
+    ///     if let Some(results) = results {
+    ///         for result in results {
+    ///             println!("Title: {}", result.title);
+    ///             println!("URL: {}", result.url);
+    ///             println!("Snippet: {}", result.snippet);
+    ///         }
+    ///     }
+    ///     
+    ///     // Don't forget to close the browser
+    ///     kagi.close().await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Page initialization fails
+    /// - Navigation to search page fails
+    /// - Authentication fails
+    /// - Result extraction fails
+    ///
     pub async fn search(
         &self,
         query: &str,

@@ -8,25 +8,30 @@ authors = ["Hanchin Hsieh <me@yuchanns.xyz>"]
 repository = "https://github.com/the-alchemists-of-arland/kagisearch"
 
 [features]
-default = []
+default = ["tokio-runtime"]
 serde = ["dep:serde"]
+tokio-runtime = ["chromiumoxide/tokio-runtime", "dep:tokio"]
+async-std-runtime = ["chromiumoxide/async-std-runtime", "dep:async-std"]
 
 [dependencies]
-chromiumoxide = { version = "0.7.0", features = ["tokio-runtime"], default-features = false }
+async-std = { version = "1", default-features = false, optional = true }
+chromiumoxide = { version = "0.7.0", default-features = false }
 futures = "0.3.31"
 futures-timer = "3.0.3"
 serde = { version = "1.0.219", features = ["derive", "serde_derive"], optional = true }
 thiserror = "2.0.12"
+tokio = { version = "1", default-features = false, optional = true }
 tracing = "0.1.41"
 url = "2.5.4"
 
 [dev-dependencies]
 anyhow = "1.0.97"
+async-std = "1"
 serde_json = "1.0.140"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-tokio = { version = "1.44.1", features = ["full"] }
+tokio = { version = "1", features = ["full"] }
 
 [[example]]
 name = "search"
 path = "examples/search.rs"
-required-features = ["serde"]
+required-features = ["serde", "tokio-runtime"]

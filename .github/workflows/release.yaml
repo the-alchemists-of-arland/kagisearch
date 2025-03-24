@@ -31,7 +31,11 @@ jobs:
         env:
           KAGI_TOKEN: "op://Github Actions/kagi/credential"
       - name: Run tests
-        run: cargo test
+        env:
+          RUST_LOG: "debug"
+        run: |
+          cargo test --no-default-features --features="tokio-runtime" -- --nocapture
+          cargo test --no-default-features --features="async-std-runtime" -- --nocapture
       - uses: olegtarasov/get-tag@v2.1
         id: tagName
         name: Get Tag Name

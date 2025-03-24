@@ -13,7 +13,7 @@ use tracing::debug;
 use url::Url;
 
 use crate::{
-    Error,
+    Error, Spawner,
     auth::{handle_signin, handle_token},
     auth_error, browser_error,
     consts::{HOST, MAX_RETRIES, RETRY_TIMEOUT},
@@ -45,14 +45,6 @@ pub enum AuthType {
 pub struct Kagi {
     auth_type: AuthType,
     browser: Browser,
-}
-
-/// Spawner trait
-/// Used to spawn futures
-/// This is required because the browser handler runs in a separate thread
-/// and we need to spawn the handler in the same runtime as the browser
-pub trait Spawner {
-    fn spawn(future: impl Future<Output = ()> + Send + 'static);
 }
 
 impl Kagi {
@@ -190,17 +182,14 @@ impl Kagi {
     /// ```rust
     /// use kagisearch::{Kagi, AuthType, Spawner};
     ///
-    /// struct TokioSpawner;
-    /// impl Spawner for TokioSpawner {
-    ///     fn spawn(future: impl std::future::Future<Output = ()> + Send + 'static) {
-    ///         tokio::spawn(future);
-    ///     }
-    /// }
-    ///
-    /// #[tokio::main]
+    /// #[cfg_attr(feature = "tokio-runtime", tokio::main)]
+    /// #[cfg_attr(feature = "async-std-runtime", async_std::main)]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let token = std::env::var("KAGI_TOKEN")?;
-    ///     let mut kagi = Kagi::new::<TokioSpawner>(AuthType::Token(token)).await?;
+    ///     #[cfg(feature = "tokio-runtime")]
+    ///     let mut kagi = Kagi::new::<tokio::runtime::Handle>(AuthType::Token(token)).await?;
+    ///     #[cfg(feature = "async-std-runtime")]
+    ///     let mut kagi = Kagi::new::<async_std::task::JoinHandle<()>>(AuthType::Token(token)).await?;
     ///     
     ///     // Search for "Rust programming" and get up to 5 results
     ///     let results = kagi.search("Rust programming", 5).await?;

@@ -18,26 +18,26 @@ Add `kagisearch` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-kagisearch = "0.2.0"
+kagisearch = "0.2"
+```
+
+async-std users should use the `async-std-runtime` feature:
+
+```toml
+[dependencies]
+kagisearch = { version = "0.2", features = ["async-std-runtime"], default-features = false }
 ```
 
 ## 🚀 Quick Start
 
 ```rust
 use kagisearch::{AuthType, Kagi};
-
-struct TokioSpawner;
-
-impl Spawner for TokioSpawner {
-    fn spawn(future: impl std::future::Future<Output = ()> + Send + 'static) {
-        tokio::spawn(future);
-    }
-}
+use tokio::runtime::Handle;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Initialize the browser with your Kagi token
-    let mut kagi = Kagi::new::<TokioSpawner>(AuthType::Token("your_token_here".to_string())).await?;
+    let mut kagi = Kagi::new::<Handle>(AuthType::Token("your_token_here".to_string())).await?;
     // Perform a search and get up to 5 results
     let results = kagi.search("Rust programming language", 5).await?;
 

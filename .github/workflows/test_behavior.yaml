@@ -39,6 +39,6 @@ jobs:
         env:
           KAGI_TOKEN: "op://Github Actions/kagi/credential"
       - name: Run tests
-        environment:
+        env:
           RUST_LOG: "debug"
         run: cargo test

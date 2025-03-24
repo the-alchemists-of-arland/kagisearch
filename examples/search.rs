@@ -1,10 +1,18 @@
-use kagisearch::{AuthType, Browser};
-use playwright::api::Cookie;
+use chromiumoxide::cdp::browser_protocol::network::CookieParam;
+use kagisearch::{AuthType, Kagi, Spawner};
 use tokio::io::AsyncBufReadExt;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{EnvFilter, fmt};
 
 const COOKIE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/target/cookies.json");
+
+struct TokioSpawner;
+
+impl Spawner for TokioSpawner {
+    fn spawn(future: impl std::future::Future<Output = ()> + Send + 'static) {
+        tokio::spawn(future);
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -18,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
 
     let auth_type = if tokio::fs::try_exists(COOKIE_PATH).await? {
         let content = tokio::fs::read(COOKIE_PATH).await?;
-        let cookies: Vec<Cookie> = serde_json::from_str(&String::from_utf8_lossy(&content))?;
+        let cookies: Vec<CookieParam> = serde_json::from_str(&String::from_utf8_lossy(&content))?;
         AuthType::Cookies(cookies)
     } else {
         let mut reader = tokio::io::BufReader::new(tokio::io::stdin());
@@ -63,15 +71,18 @@ async fn main() -> anyhow::Result<()> {
 
     let save = !matches!(auth_type, AuthType::Cookies(_));
 
-    let browser = Browser::new(auth_type).await?;
-    let result = browser.search("What is Kagi Search", 5).await?;
+    let mut kagi = Kagi::new::<TokioSpawner>(auth_type).await?;
+    let result = kagi.search("What is Kagi Search", 5).await?;
+    let Some(result) = result else {
+        return Err(anyhow::anyhow!("No result found"));
+    };
     println!("{}", serde_json::to_string_pretty(&result)?);
 
     if save {
-        if let Some(cookies) = browser.cookies().await? {
-            tokio::fs::write(COOKIE_PATH, serde_json::to_string(&cookies)?).await?;
-        }
+        let cookies = kagi.cookies().await?;
+        tokio::fs::write(COOKIE_PATH, serde_json::to_string(&cookies)?).await?;
     }
+    kagi.close().await?;
 
     Ok(())
 }

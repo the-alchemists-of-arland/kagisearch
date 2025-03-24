@@ -1,10 +1,9 @@
 [package]
 name = "kagisearch"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "Apache-2.0"
-license-file = "LICENSE"
-description = "A Rust library that allows you to perform Kagi searches programmatically using Playwright, without consuming additional API credits."
+description = "A Rust library that allows you to perform Kagi searches programmatically using chromiumoxide, without consuming additional API credits."
 authors = ["Hanchin Hsieh <me@yuchanns.xyz>"]
 repository = "https://github.com/the-alchemists-of-arland/kagisearch"
 
@@ -13,7 +12,9 @@ default = []
 serde = ["dep:serde"]
 
 [dependencies]
-playwright = "0.0.20"
+chromiumoxide = { version = "0.7.0", features = ["tokio-runtime"], default-features = false }
+futures = "0.3.31"
+futures-timer = "3.0.3"
 serde = { version = "1.0.219", features = ["derive", "serde_derive"], optional = true }
 thiserror = "2.0.12"
 tracing = "0.1.41"

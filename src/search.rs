@@ -1,16 +1,22 @@
-use playwright::{
-    Playwright,
-    api::{BrowserContext, Cookie, Page, frame::FrameState},
+use chromiumoxide::{
+    BrowserConfig, Element, Page,
+    browser::Browser,
+    cdp::browser_protocol::{
+        network::{Cookie, CookieParam},
+        target::CreateTargetParams,
+    },
+    handler::viewport::Viewport,
 };
+use futures::StreamExt;
+use futures_timer::Delay;
 use tracing::debug;
 use url::Url;
 
 use crate::{
     Error,
     auth::{handle_signin, handle_token},
-    auth_error,
-    consts::{BROWSER_INIT_SCRIPT, HOST, SCREEN_INIT_SCRIPT},
-    element_error,
+    auth_error, browser_error,
+    consts::{HOST, MAX_RETRIES, RETRY_TIMEOUT},
 };
 
 /// Search result
@@ -32,34 +38,55 @@ pub enum AuthType {
     /// Login with a token
     Token(String),
     /// Load cookies
-    Cookies(Vec<Cookie>),
+    Cookies(Vec<CookieParam>),
 }
 
 /// Browser instance
-pub struct Browser {
-    context: BrowserContext,
+pub struct Kagi {
     auth_type: AuthType,
-
-    // Store these to prevent them from being dropped
-    _playwright: Playwright,
-    _browser: playwright::api::Browser,
+    browser: Browser,
 }
 
-impl Browser {
-    /// Create a new browser instance
-    pub async fn new(auth_type: AuthType) -> Result<Self, Error> {
-        let _playwright = Playwright::initialize().await?;
-        _playwright.prepare()?; // Install browsers
-        let chromium = _playwright.chromium();
-        let _browser = chromium
-            .launcher()
-            .headless(true)
-            .args(
-                &[
+/// Spawner trait
+/// Used to spawn futures
+/// This is required because the browser handler runs in a separate thread
+/// and we need to spawn the handler in the same runtime as the browser
+pub trait Spawner {
+    fn spawn(future: impl Future<Output = ()> + Send + 'static);
+}
+
+impl Kagi {
+    /// Create a new browser instance with authentication.
+    ///
+    /// This method initializes a new headless browser instance with pre-configured settings optimized
+    /// for web scraping. It requires a spawner implementation to handle browser events in the background.
+    ///
+    /// # Authentication Types
+    ///
+    /// The browser can be authenticated in three ways:
+    /// - Using email and password (with optional 2FA)
+    /// - Using a Kagi login token
+    /// - Using pre-saved cookies
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Browser initialization fails
+    /// - Cookie loading fails (when using `AuthType::Cookies`)
+    ///
+    pub async fn new<S: Spawner>(auth_type: AuthType) -> Result<Self, Error> {
+        let viewport = Viewport {
+            width: 1920,
+            height: 1080,
+            ..Default::default()
+        };
+        let (browser, mut handler) = Browser::launch(
+            BrowserConfig::builder()
+                .viewport(viewport)
+                .args([
                     "--disable-blink-features=AutomationControlled",
                     "--disable-features=IsolateOrigins,site-per-process",
                     "--disable-site-isolation-trials",
-                    "--disable-web-security",
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
@@ -81,51 +108,140 @@ impl Browser {
                     "--enable-features=NetworkService,NetworkServiceInProcess",
                     "--force-color-profile=srgb",
                     "--metrics-recording-only",
-                ]
-                .map(Into::into),
-            )
-            .launch()
-            .await?;
-        let context = _browser.context_builder().build().await?;
-        context.add_init_script(BROWSER_INIT_SCRIPT).await?;
+                ])
+                .build()
+                .map_err(|e| browser_error!("{}", e))?,
+        )
+        .await?;
+        S::spawn(async move {
+            while let Some(h) = handler.next().await {
+                match h {
+                    Ok(_) => continue,
+                    Err(e) => {
+                        debug!("Browser handler error: {}", e);
+                        if e.to_string().contains("Browser closed") {
+                            break;
+                        }
+                    }
+                }
+            }
+            debug!("Browser handler stopped");
+        });
         if let AuthType::Cookies(cookies) = &auth_type {
-            context.add_cookies(cookies).await?;
+            browser.set_cookies(cookies.to_vec()).await?;
             debug!("Cookies loaded");
         }
-        Ok(Self {
-            context,
-            auth_type,
-            _playwright,
-            _browser,
-        })
+        Ok(Self { auth_type, browser })
+    }
+
+    /// Close the browser instance
+    pub async fn close(&mut self) -> Result<(), Error> {
+        self.browser.close().await?;
+        self.browser.wait().await?;
+        Ok(())
     }
 
     /// Get the cookies stored in the browser context
-    pub async fn cookies(&self) -> Result<Option<Vec<Cookie>>, Error> {
-        let storage = self.context.storage_state().await?;
-        Ok(storage.cookies)
+    pub async fn cookies(&self) -> Result<Vec<Cookie>, Error> {
+        let cookies = self.browser.get_cookies().await?;
+        Ok(cookies)
     }
 
     /// Initialize a new page with anti-detection scripts
     async fn init_page(&self) -> Result<Page, Error> {
-        let page = self.context.new_page().await?;
-        page.add_init_script(SCREEN_INIT_SCRIPT).await?;
+        let page = self
+            .browser
+            .new_page(
+                CreateTargetParams::builder()
+                    .url("about:blank")
+                    .build()
+                    .map_err(|e| browser_error!("{}", e))?,
+            )
+            .await?;
         Ok(page)
     }
 
-    /// Search for a query and return the results
-    /// The limit parameter specifies the maximum number of results to return
-    pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, Error> {
+    /// Performs a search query on Kagi and returns the results.
+    ///
+    /// This method will:
+    /// 1. Create a new page
+    /// 2. Navigate to Kagi search
+    /// 3. Handle authentication if needed
+    /// 4. Extract search results
+    ///
+    /// # Parameters
+    ///
+    /// - `query`: The search term to look for
+    /// - `limit`: Maximum number of results to return
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(Some(Vec<SearchResult>))` if the search was successful and results were found.
+    /// Returns `Ok(None)` if no results were found.
+    /// Returns `Err` if any error occurred during the search process.
+    ///
+    /// Each `SearchResult` contains:
+    /// - `title`: The title of the search result
+    /// - `url`: The URL of the result
+    /// - `snippet`: A brief description or snippet from the result
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use kagisearch::{Kagi, AuthType, Spawner};
+    ///
+    /// struct TokioSpawner;
+    /// impl Spawner for TokioSpawner {
+    ///     fn spawn(future: impl std::future::Future<Output = ()> + Send + 'static) {
+    ///         tokio::spawn(future);
+    ///     }
+    /// }
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let token = std::env::var("KAGI_TOKEN")?;
+    ///     let mut kagi = Kagi::new::<TokioSpawner>(AuthType::Token(token)).await?;
+    ///     
+    ///     // Search for "Rust programming" and get up to 5 results
+    ///     let results = kagi.search("Rust programming", 5).await?;
+    ///     
+    ///     if let Some(results) = results {
+    ///         for result in results {
+    ///             println!("Title: {}", result.title);
+    ///             println!("URL: {}", result.url);
+    ///             println!("Snippet: {}", result.snippet);
+    ///         }
+    ///     }
+    ///     
+    ///     // Don't forget to close the browser
+    ///     kagi.close().await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Page initialization fails
+    /// - Navigation to search page fails
+    /// - Authentication fails
+    /// - Result extraction fails
+    ///
+    pub async fn search(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Option<Vec<SearchResult>>, Error> {
         let page = self.init_page().await?;
 
         loop {
             let url = Url::parse_with_params(&format!("{}/search", HOST), &[("q", query)])?;
-            page.goto_builder(url.as_str())
-                .wait_until(playwright::api::DocumentLoadState::NetworkIdle)
-                .goto()
-                .await?;
-
-            if Url::parse(&page.url()?)?.path() == "/signin" {
+            page.goto(url).await?.wait_for_navigation().await?;
+            let Some(url) = page.url().await? else {
+                return Err(browser_error!("Failed to get URL"));
+            };
+            let url = Url::parse(&url)?;
+            if url.path() == "/signin" {
                 debug!("Sign in required");
                 match &self.auth_type {
                     AuthType::Login(email, password, code) => {
@@ -138,56 +254,72 @@ impl Browser {
                         return Err(auth_error!("Invalid cookies"));
                     }
                 }
-
                 continue;
             }
-
+            if url.path() != "/search" {
+                return Err(browser_error!("Failed to navigate to search page"));
+            }
             debug!("Already signed in");
             break;
         }
-        let Some(results) = page
-            .wait_for_selector_builder(".results-box")
-            .state(FrameState::Visible)
-            .wait_for_selector()
-            .await?
-        else {
-            return Err(element_error!("Results box not found"));
+
+        let search_results = async {
+            for _ in 0..MAX_RETRIES {
+                let results = page.find_element(".results-box").await?;
+                debug!("Results found");
+                let search_results = results.find_elements(".search-result").await?;
+                debug!("Search results found");
+                if search_results.is_empty() {
+                    debug!("No search results found, waiting");
+                    // Sometimes the results take a while to load
+                    Delay::new(RETRY_TIMEOUT).await;
+                    continue;
+                }
+                return Ok(Some(search_results));
+            }
+            Ok::<Option<Vec<Element>>, Error>(None)
+        }
+        .await?;
+
+        let Some(search_results) = search_results else {
+            return Ok(None);
         };
-        let search_results = results.query_selector_all(".search-result").await?;
+
         let mut results = Vec::new();
         for result in &search_results {
             if results.len() >= limit {
                 break;
             }
-            let Some(title) = result.query_selector(".__sri-title").await? else {
+            let Ok(title) = result.find_element(".__sri-title").await else {
                 debug!("Title class not found");
                 continue;
             };
-            let title = title.inner_text().await?;
-            let Some(url) = result.query_selector(".__sri-url-box").await? else {
+            let Some(title) = title.inner_text().await? else {
+                debug!("Title class not found");
+                continue;
+            };
+            let Ok(url) = result.find_element(".__sri-url-box").await else {
                 debug!("URL class not found");
                 continue;
             };
-            let Some(url) = url.query_selector("a").await? else {
-                debug!("URL link not found");
-                continue;
-            };
-            let Some(url) = url.get_attribute("href").await? else {
+            let Some(url) = url.find_element("a").await?.attribute("href").await? else {
                 debug!("URL attribute not found");
                 continue;
             };
-            let Some(snippet) = result.query_selector(".__sri-desc").await? else {
+            let Ok(snippet) = result.find_element(".__sri-desc").await else {
                 debug!("Description class not found");
                 continue;
             };
-            let snippet = snippet.inner_text().await?;
-
+            let Some(snippet) = snippet.inner_text().await? else {
+                debug!("Description class not found");
+                continue;
+            };
             results.push(SearchResult {
                 title,
                 url,
                 snippet,
             });
         }
-        Ok(results)
+        Ok(Some(results))
     }
 }

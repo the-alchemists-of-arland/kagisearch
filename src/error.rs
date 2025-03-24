@@ -1,5 +1,4 @@
-use playwright::Error as PlaywrightError;
-use std::sync::Arc;
+use chromiumoxide::error::CdpError;
 
 #[macro_export]
 macro_rules! auth_error {
@@ -22,6 +21,13 @@ macro_rules! browser_error {
     }
 }
 
+#[macro_export]
+macro_rules! spawner_error {
+    ($($arg:tt)*) => {
+        Error::SpawnerError(format!($($arg)*))
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Authentication failed: {0}")]
@@ -32,10 +38,10 @@ pub enum Error {
     BrowserError(String),
     #[error("URL parsing error: {0}")]
     UrlError(#[from] url::ParseError),
-    #[error("Playwright error: {0}")]
-    PlaywrightError(#[from] PlaywrightError),
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
-    #[error("Playwright error error: {0}")]
-    ArcError(#[from] Arc<PlaywrightError>),
+    #[error("CDP error: {0}")]
+    CdpError(#[from] CdpError),
+    #[error("Spawner error: {0}")]
+    SpawnerError(String),
 }

@@ -1,16 +1,9 @@
-use kagisearch::{AuthType, Kagi, Spawner};
+use kagisearch::{AuthType, Kagi};
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{EnvFilter, fmt};
 
-struct TokioSpawner;
-
-impl Spawner for TokioSpawner {
-    fn spawn(future: impl std::future::Future<Output = ()> + Send + 'static) {
-        tokio::spawn(future);
-    }
-}
-
-#[tokio::test]
+#[cfg_attr(feature = "tokio-runtime", tokio::test)]
+#[cfg_attr(feature = "async-std-runtime", async_std::test)]
 async fn test_search() -> anyhow::Result<()> {
     fmt()
         .with_env_filter(
@@ -21,7 +14,10 @@ async fn test_search() -> anyhow::Result<()> {
         .init();
 
     let token = std::env::var("KAGI_TOKEN")?;
-    let mut kagi = Kagi::new::<TokioSpawner>(AuthType::Token(token)).await?;
+    #[cfg(feature = "tokio-runtime")]
+    let mut kagi = Kagi::new::<tokio::runtime::Handle>(AuthType::Token(token)).await?;
+    #[cfg(feature = "async-std-runtime")]
+    let mut kagi = Kagi::new::<async_std::task::JoinHandle<()>>(AuthType::Token(token)).await?;
     let results = kagi.search("Rust programming language", 5).await?;
     let Some(results) = results else {
         return Err(anyhow::anyhow!("No search results found"));

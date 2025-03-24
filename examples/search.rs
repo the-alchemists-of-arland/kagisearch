@@ -1,18 +1,10 @@
 use chromiumoxide::cdp::browser_protocol::network::CookieParam;
-use kagisearch::{AuthType, Kagi, Spawner};
-use tokio::io::AsyncBufReadExt;
+use kagisearch::{AuthType, Kagi};
+use tokio::{io::AsyncBufReadExt, runtime::Handle};
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{EnvFilter, fmt};
 
 const COOKIE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/target/cookies.json");
-
-struct TokioSpawner;
-
-impl Spawner for TokioSpawner {
-    fn spawn(future: impl std::future::Future<Output = ()> + Send + 'static) {
-        tokio::spawn(future);
-    }
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -71,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
 
     let save = !matches!(auth_type, AuthType::Cookies(_));
 
-    let mut kagi = Kagi::new::<TokioSpawner>(auth_type).await?;
+    let mut kagi = Kagi::new::<Handle>(auth_type).await?;
     let result = kagi.search("What is Kagi Search", 5).await?;
     let Some(result) = result else {
         return Err(anyhow::anyhow!("No result found"));

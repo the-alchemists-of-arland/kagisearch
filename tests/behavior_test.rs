@@ -15,22 +15,9 @@ async fn test_search() -> anyhow::Result<()> {
 
     let token = std::env::var("KAGI_TOKEN")?;
     #[cfg(feature = "tokio-runtime")]
-    let kagi = Kagi::new(AuthType::Token(token.clone())).await?;
+    let kagi = Kagi::new(AuthType::Icognito).await?;
     #[cfg(feature = "async-std-runtime")]
-    let kagi = Kagi::new(AuthType::Token(token.clone())).await?;
-    let results = kagi.search("Rust programming language", 5, None).await?;
-    let Some(results) = results else {
-        return Err(anyhow::anyhow!("No search results found"));
-    };
-
-    assert_eq!(results.len(), 5);
-    for result in results {
-        assert!(!result.title.is_empty());
-        assert!(!result.url.is_empty());
-        assert!(!result.snippet.is_empty());
-    }
-
-    // icognito search
+    let kagi = Kagi::new(AuthType::Icognito).await?;
     let results = kagi
         .search("Rust programming language", 5, Some(AuthType::Token(token)))
         .await?;

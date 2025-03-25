@@ -1,6 +1,6 @@
 [package]
 name = "kagisearch"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "A Rust library that allows you to perform Kagi searches programmatically using chromiumoxide, without consuming additional API credits."

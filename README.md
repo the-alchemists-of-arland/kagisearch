@@ -11,6 +11,7 @@ A Rust library that allows you to perform Kagi searches programmatically using c
 
 - 💳 No additional API credits required
 - 🔐 Supports token-based, F2A-based and cookie-based authentication
+- 🕵️ Incognito mode allows you to perform searches without saving your authentication.
 
 ## 📦 Installation
 

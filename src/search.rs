@@ -36,6 +36,7 @@ pub struct SearchResult {
 }
 
 /// Authentication type
+#[derive(Debug)]
 pub enum AuthType {
     /// Login with username, password and optional 2FA code
     Login(String, String, Option<String>),
@@ -250,12 +251,13 @@ impl Kagi {
         limit: usize,
         auth_type: Option<AuthType>,
     ) -> Result<Option<Vec<SearchResult>>, Error> {
+        let page = self.init_page(&self.auth_type).await?;
+
         let auth_type = if let Some(auth_type) = &auth_type {
             auth_type
         } else {
             &self.auth_type
         };
-        let page = self.init_page(auth_type).await?;
 
         loop {
             let url = Url::parse_with_params(&format!("{}/search", HOST), &[("q", query)])?;

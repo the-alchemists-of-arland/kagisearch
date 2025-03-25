@@ -19,14 +19,14 @@ Add `kagisearch` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-kagisearch = "0.2"
+kagisearch = "0.3"
 ```
 
 async-std users should use the `async-std-runtime` feature:
 
 ```toml
 [dependencies]
-kagisearch = { version = "0.2", features = ["async-std-runtime"], default-features = false }
+kagisearch = { version = "0.3", features = ["async-std-runtime"], default-features = false }
 ```
 
 ## 🚀 Quick Start

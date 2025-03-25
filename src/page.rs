@@ -37,6 +37,7 @@ impl Drop for Page {
     fn drop(&mut self) {
         if let Some(context_id) = self.context_id.take() {
             let browser = self.browser.clone();
+            debug!("Disposing browser context: {:?}", context_id);
             spawn(async move {
                 if let Err(e) = browser
                     .read()

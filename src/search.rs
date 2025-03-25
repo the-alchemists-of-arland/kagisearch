@@ -84,6 +84,7 @@ impl Kagi {
         let (browser, mut handler) = Browser::launch(
             BrowserConfig::builder()
                 .viewport(viewport)
+                .incognito()
                 .args([
                     "--disable-blink-features=AutomationControlled",
                     "--disable-features=IsolateOrigins,site-per-process",
@@ -159,6 +160,7 @@ impl Kagi {
     async fn init_page(&self, auth_type: &AuthType) -> Result<Page, Error> {
         let browser = self.browser.read().await;
         let context_id = if let AuthType::Icognito = auth_type {
+            debug!("Creating incognito browser context");
             Some(
                 browser
                     .create_browser_context(CreateBrowserContextParams::default())

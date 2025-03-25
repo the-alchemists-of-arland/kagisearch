@@ -63,8 +63,12 @@ async fn main() -> anyhow::Result<()> {
 
     let save = !matches!(auth_type, AuthType::Cookies(_));
 
-    let kagi = Kagi::new(auth_type).await?;
-    let result = kagi.search("What is Kagi Search", 5, None).await?;
+    let (kagi, auth_type) = if let AuthType::Cookies(_) = auth_type {
+        (Kagi::new(auth_type).await?, None)
+    } else {
+        (Kagi::new(AuthType::Icognito).await?, Some(auth_type))
+    };
+    let result = kagi.search("What is Kagi Search", 5, auth_type).await?;
     let Some(result) = result else {
         return Err(anyhow::anyhow!("No result found"));
     };

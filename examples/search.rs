@@ -1,6 +1,6 @@
 use chromiumoxide::cdp::browser_protocol::network::CookieParam;
 use kagisearch::{AuthType, Kagi};
-use tokio::{io::AsyncBufReadExt, runtime::Handle};
+use tokio::io::AsyncBufReadExt;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -63,8 +63,12 @@ async fn main() -> anyhow::Result<()> {
 
     let save = !matches!(auth_type, AuthType::Cookies(_));
 
-    let mut kagi = Kagi::new::<Handle>(auth_type).await?;
-    let result = kagi.search("What is Kagi Search", 5).await?;
+    let (kagi, auth_type) = if let AuthType::Cookies(_) = auth_type {
+        (Kagi::new(auth_type).await?, None)
+    } else {
+        (Kagi::new(AuthType::Icognito).await?, Some(auth_type))
+    };
+    let result = kagi.search("What is Kagi Search", 5, auth_type).await?;
     let Some(result) = result else {
         return Err(anyhow::anyhow!("No result found"));
     };

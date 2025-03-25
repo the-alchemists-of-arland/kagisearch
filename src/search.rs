@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use chromiumoxide::{
-    BrowserConfig, Element, Page,
+    BrowserConfig, Element,
     browser::Browser,
     cdp::browser_protocol::{
         network::{Cookie, CookieParam},
-        target::CreateTargetParams,
+        target::{CreateBrowserContextParams, CreateTargetParams},
     },
     handler::viewport::Viewport,
 };
@@ -13,10 +15,12 @@ use tracing::debug;
 use url::Url;
 
 use crate::{
-    Error, Spawner,
+    Error,
     auth::{handle_signin, handle_token},
     auth_error, browser_error,
     consts::{HOST, MAX_RETRIES, RETRY_TIMEOUT},
+    page::Page,
+    spawner::spawn,
 };
 
 /// Search result
@@ -39,12 +43,17 @@ pub enum AuthType {
     Token(String),
     /// Load cookies
     Cookies(Vec<CookieParam>),
+    /// Use incognito mode
+    Icognito,
 }
 
 /// Browser instance
 pub struct Kagi {
     auth_type: AuthType,
-    browser: Browser,
+    #[cfg(feature = "tokio-runtime")]
+    browser: Arc<tokio::sync::RwLock<Browser>>,
+    #[cfg(feature = "async-std-runtime")]
+    browser: Arc<async_std::sync::RwLock<Browser>>,
 }
 
 impl Kagi {
@@ -66,7 +75,7 @@ impl Kagi {
     /// - Browser initialization fails
     /// - Cookie loading fails (when using `AuthType::Cookies`)
     ///
-    pub async fn new<S: Spawner>(auth_type: AuthType) -> Result<Self, Error> {
+    pub async fn new(auth_type: AuthType) -> Result<Self, Error> {
         let viewport = Viewport {
             width: 1920,
             height: 1080,
@@ -105,7 +114,7 @@ impl Kagi {
                 .map_err(|e| browser_error!("{}", e))?,
         )
         .await?;
-        S::spawn(async move {
+        spawn(async move {
             while let Some(h) = handler.next().await {
                 match h {
                     Ok(_) => continue,
@@ -123,34 +132,49 @@ impl Kagi {
             browser.set_cookies(cookies.to_vec()).await?;
             debug!("Cookies loaded");
         }
-        Ok(Self { auth_type, browser })
+        Ok(Self {
+            auth_type,
+            #[cfg(feature = "tokio-runtime")]
+            browser: Arc::new(tokio::sync::RwLock::new(browser)),
+            #[cfg(feature = "async-std-runtime")]
+            browser: Arc::new(async_std::sync::RwLock::new(browser)),
+        })
     }
 
     /// Close the browser instance
-    pub async fn close(&mut self) -> Result<(), Error> {
-        self.browser.close().await?;
-        self.browser.wait().await?;
+    pub async fn close(&self) -> Result<(), Error> {
+        let mut browser = self.browser.write().await;
+        browser.close().await?;
+        browser.wait().await?;
         Ok(())
     }
 
     /// Get the cookies stored in the browser context
     pub async fn cookies(&self) -> Result<Vec<Cookie>, Error> {
-        let cookies = self.browser.get_cookies().await?;
+        let cookies = self.browser.read().await.get_cookies().await?;
         Ok(cookies)
     }
 
-    /// Initialize a new page with anti-detection scripts
-    async fn init_page(&self) -> Result<Page, Error> {
-        let page = self
-            .browser
-            .new_page(
-                CreateTargetParams::builder()
-                    .url("about:blank")
-                    .build()
-                    .map_err(|e| browser_error!("{}", e))?,
+    /// Initialize a new page with optional incognito mode
+    async fn init_page(&self, auth_type: &AuthType) -> Result<Page, Error> {
+        let browser = self.browser.read().await;
+        let context_id = if let AuthType::Icognito = auth_type {
+            Some(
+                browser
+                    .create_browser_context(CreateBrowserContextParams::default())
+                    .await?,
             )
-            .await?;
-        Ok(page)
+        } else {
+            None
+        };
+        let mut builder = CreateTargetParams::builder().url("about:blank");
+        if let Some(context_id) = &context_id {
+            builder = builder.browser_context_id(context_id.clone());
+        }
+        let param = builder.build().map_err(|e| browser_error!("{}", e))?;
+        let page = browser.new_page(param).await?;
+        let _ = browser;
+        Ok(Page::new(page, context_id, self.browser.clone()))
     }
 
     /// Performs a search query on Kagi and returns the results.
@@ -165,6 +189,8 @@ impl Kagi {
     ///
     /// - `query`: The search term to look for
     /// - `limit`: Maximum number of results to return
+    /// - `auth_type`: Optional authentication type to use for this search performing in incognito
+    ///     mode. Only `AuthType::Token` and `AuthType::Login` are supported.
     ///
     /// # Returns
     ///
@@ -180,19 +206,19 @@ impl Kagi {
     /// # Examples
     ///
     /// ```rust
-    /// use kagisearch::{Kagi, AuthType, Spawner};
+    /// use kagisearch::{Kagi, AuthType};
     ///
     /// #[cfg_attr(feature = "tokio-runtime", tokio::main)]
     /// #[cfg_attr(feature = "async-std-runtime", async_std::main)]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let token = std::env::var("KAGI_TOKEN")?;
     ///     #[cfg(feature = "tokio-runtime")]
-    ///     let mut kagi = Kagi::new::<tokio::runtime::Handle>(AuthType::Token(token)).await?;
+    ///     let mut kagi = Kagi::new(AuthType::Token(token)).await?;
     ///     #[cfg(feature = "async-std-runtime")]
-    ///     let mut kagi = Kagi::new::<async_std::task::JoinHandle<()>>(AuthType::Token(token)).await?;
+    ///     let mut kagi = Kagi::new(AuthType::Token(token)).await?;
     ///     
     ///     // Search for "Rust programming" and get up to 5 results
-    ///     let results = kagi.search("Rust programming", 5).await?;
+    ///     let results = kagi.search("Rust programming", 5, None).await?;
     ///     
     ///     if let Some(results) = results {
     ///         for result in results {
@@ -220,27 +246,36 @@ impl Kagi {
         &self,
         query: &str,
         limit: usize,
+        auth_type: Option<AuthType>,
     ) -> Result<Option<Vec<SearchResult>>, Error> {
-        let page = self.init_page().await?;
+        let auth_type = if let Some(auth_type) = &auth_type {
+            auth_type
+        } else {
+            &self.auth_type
+        };
+        let page = self.init_page(auth_type).await?;
 
         loop {
             let url = Url::parse_with_params(&format!("{}/search", HOST), &[("q", query)])?;
-            page.goto(url).await?.wait_for_navigation().await?;
-            let Some(url) = page.url().await? else {
+            page.inner().goto(url).await?.wait_for_navigation().await?;
+            let Some(url) = page.inner().url().await? else {
                 return Err(browser_error!("Failed to get URL"));
             };
             let url = Url::parse(&url)?;
             if url.path() == "/signin" {
                 debug!("Sign in required");
-                match &self.auth_type {
+                match auth_type {
                     AuthType::Login(email, password, code) => {
-                        handle_signin(&page, email, password, code.as_deref()).await?;
+                        handle_signin(page.inner(), email, password, code.as_deref()).await?;
                     }
                     AuthType::Token(token) => {
-                        handle_token(&page, token).await?;
+                        handle_token(page.inner(), token).await?;
                     }
                     AuthType::Cookies(_) => {
                         return Err(auth_error!("Invalid cookies"));
+                    }
+                    AuthType::Icognito => {
+                        return Err(auth_error!("Incognito mode not supported"));
                     }
                 }
                 continue;
@@ -254,7 +289,7 @@ impl Kagi {
 
         let search_results = async {
             for _ in 0..MAX_RETRIES {
-                let results = page.find_element(".results-box").await?;
+                let results = page.inner().find_element(".results-box").await?;
                 debug!("Results found");
                 let search_results = results.find_elements(".search-result").await?;
                 debug!("Search results found");

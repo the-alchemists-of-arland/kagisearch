@@ -15,10 +15,10 @@ async fn test_search() -> anyhow::Result<()> {
 
     let token = std::env::var("KAGI_TOKEN")?;
     #[cfg(feature = "tokio-runtime")]
-    let mut kagi = Kagi::new::<tokio::runtime::Handle>(AuthType::Token(token)).await?;
+    let kagi = Kagi::new(AuthType::Token(token)).await?;
     #[cfg(feature = "async-std-runtime")]
-    let mut kagi = Kagi::new::<async_std::task::JoinHandle<()>>(AuthType::Token(token)).await?;
-    let results = kagi.search("Rust programming language", 5).await?;
+    let kagi = Kagi::new(AuthType::Token(token)).await?;
+    let results = kagi.search("Rust programming language", 5, None).await?;
     let Some(results) = results else {
         return Err(anyhow::anyhow!("No search results found"));
     };

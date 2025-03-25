@@ -32,14 +32,13 @@ kagisearch = { version = "0.2", features = ["async-std-runtime"], default-featur
 
 ```rust
 use kagisearch::{AuthType, Kagi};
-use tokio::runtime::Handle;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Initialize the browser with your Kagi token
-    let mut kagi = Kagi::new::<Handle>(AuthType::Token("your_token_here".to_string())).await?;
+    let kagi = Kagi::new(AuthType::Token("your_token_here".to_string())).await?;
     // Perform a search and get up to 5 results
-    let results = kagi.search("Rust programming language", 5).await?;
+    let results = kagi.search("Rust programming language", 5, None).await?;
 
     let Some(results) = results else {
         return Err(anyhow::anyhow!("No search results found"));

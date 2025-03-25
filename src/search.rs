@@ -36,7 +36,6 @@ pub struct SearchResult {
 }
 
 /// Authentication type
-#[derive(Debug)]
 pub enum AuthType {
     /// Login with username, password and optional 2FA code
     Login(String, String, Option<String>),
